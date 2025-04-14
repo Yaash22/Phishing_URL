@@ -1,87 +1,61 @@
 import streamlit as st
-import pickle
-from utils.features import extract_features
-import datetime
+import joblib
 import os
+import re
+import tldextract
 
-def main():
-    # Load model
-    with open("model/phishing_model.pkl", "rb") as f:
-        model = pickle.load(f)
+# Load model
+model_path = os.path.join("model", "phishing_model.pkl")
+model = joblib.load(model_path)
 
-    st.title("🔐 Phishing URL Detector")
-    st.markdown("Enter a URL to check if it's phishing or legitimate.")
+# Define feature extraction function
+def extract_features(url):
+    features = {}
 
-    # Initialize session history if it doesn't exist
-    if "history" not in st.session_state:
-        st.session_state.history = []
+    # Length of URL
+    features['url_length'] = len(url)
 
-    url = st.text_input("🌐 Enter URL", placeholder="https://example.com")
+    # Presence of IP address
+    ip_regex = re.compile(
+        r"^(http://|https://)?(\d{1,3}\.){3}\d{1,3}(/|:\d+)?([/?].*)?$")
+    features['has_ip'] = 1 if ip_regex.match(url) else 0
 
-    if st.button("Predict"):
-        if url:
-            features = extract_features(url)
-            prediction = model.predict([features])[0]
+    # Presence of '@' symbol
+    features['has_at_symbol'] = 1 if '@' in url else 0
 
-            # Prepare prediction message
-            if prediction == 1:
-                result_message = "🟢 This website is **Legitimate**."
-                st.success(result_message)
-            else:
-                result_message = "🔴 This website is **Phishing**."
-                st.error(result_message)
+    # Count of dots
+    features['count_dots'] = url.count('.')
 
-            # Generate report
-            report = f"""
-            🔍 Phishing URL Detection Report  
-            ====================================  
-            📅 Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
+    # Count of hyphens
+    features['count_hyphens'] = url.count('-')
 
-            🌐 URL Checked: {url}  
+    # Count of slashes
+    features['count_slashes'] = url.count('/')
 
-            📊 Detection Result: {'Legitimate' if prediction == 1 else 'Phishing'}  
+    # Count of subdirectories
+    features['count_subdirs'] = url.count('/')
 
-            📈 Model Used: RandomForestClassifier  
-            📑 Total Features Extracted: {len(features)}  
+    # Length of domain
+    domain = tldextract.extract(url).domain
+    features['domain_length'] = len(domain)
 
-            ✅ Suggestion: Always double-check URLs before entering sensitive information.  
-            """
+    return list(features.values())
 
-            # Show and download report
-            st.markdown("### 📄 Detection Report")
-            st.text(report)
-            st.download_button(
-                label="📥 Download Report",
-                data=report,
-                file_name=f"phishing_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                mime="text/plain"
-            )
+# Streamlit UI
+st.set_page_config(page_title="Phishing URL Detector", layout="centered")
+st.title("🔍 Phishing URL Detector")
+st.markdown("Enter a URL below to check whether it's **legitimate** or a **phishing** attempt.")
 
-            # Add to session history
-            st.session_state.history.append({
-                "timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "url": url,
-                "result": "Legitimate" if prediction == 1 else "Phishing"
-            })
+url_input = st.text_input("Enter URL:", "")
 
+if url_input:
+    try:
+        features = extract_features(url_input)
+        prediction = model.predict([features])[0]
+
+        if prediction == 1:
+            st.error("⚠️ The URL appears to be **phishing**. Do not click!")
         else:
-            st.warning("Please enter a valid URL.")
-
-    # Sidebar session history tab
-    with st.sidebar:
-        st.title("📜 Session History")
-        if st.session_state.history:
-            for record in reversed(st.session_state.history):
-                st.markdown(f"""
-                **🕒 {record['timestamp']}**
-                - 🌐 `{record['url']}`
-                - 📊 **{record['result']}**
-                ---
-                """)
-        else:
-            st.info("No URLs checked yet this session.")
-
-if __name__ == "__main__":
-    # Optional: Force Streamlit to use a specific port using environment variables
-    os.environ["STREAMLIT_SERVER_PORT"] = "8501"  # Change port if needed
-    main()
+            st.success("✅ The URL appears to be **safe**.")
+    except Exception as e:
+        st.error(f"Error: {e}")
